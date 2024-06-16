@@ -1,0 +1,11 @@
+{
+  "compilerOptions": {
+    "lib": ["ES2022"],
+    "module": "ES2022",
+    "moduleResolution": "node", // introduced in TypeScript 5.0
+    "allowSyntheticDefaultImports": true,
+    "sourceMap": true,
+    "target": "ES2022",
+    "strict": true
+  }
+}
