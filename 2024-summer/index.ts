@@ -258,7 +258,6 @@ abstract class GameState {
 }
 
 type HurdleGameStateArgs = GameStateArgs & {
-  gameNumber: number;
   map: string;
   position1: number;
   position2: number;
@@ -279,7 +278,6 @@ class HurdleActor {
 
 class HurdleGameState extends GameState {
   private MAP_LENGTH = 30;
-  gameNumber: number;
   map: string;
   myPlayer: HurdleActor;
   enemyPlayer1: HurdleActor;
@@ -1073,7 +1071,6 @@ while (true) {
     switch (i) {
       case 0:
         const hurdleGameState = new HurdleGameState({
-          gameNumber: i,
           gpu,
           turn,
           map: gpu,
