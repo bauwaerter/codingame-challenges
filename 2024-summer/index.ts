@@ -9,6 +9,7 @@ const enemyPlayer2Idx: number = (myPlayerIdx + 2) % 3;
 const nbGames: number = parseInt(readline());
 
 const TOTAL_TURNS = 100;
+const STUNNED_WEIGHT = 5;
 let turn = 1;
 
 class MedalCounts {
@@ -200,15 +201,17 @@ function weightMoves({
   moves,
   turnsLeft,
   currentPlacement,
-  needsMedal,
+  hasGoldMedal,
+  hasSilverMedal,
 }: {
   moves: { [key in keyof typeof MOVES]: number };
   turnsLeft: number;
   currentPlacement: number;
-  needsMedal: boolean;
+  hasGoldMedal: boolean;
+  hasSilverMedal: boolean;
 }): { [key in keyof typeof MOVES]: number } {
   for (const [key, value] of Object.entries(moves)) {
-    moves[key] = value + (currentPlacement % 2) + (needsMedal ? 0 : 1);
+    moves[key] = value;
   }
   return moves;
 }
@@ -251,7 +254,8 @@ abstract class GameState {
     return placements[myPlayerIdx] === 3;
   }
 
-  abstract hasGoldOrSilver(): boolean;
+  abstract hasGoldMedal(): boolean;
+  abstract hasSilverMedal(): boolean;
   abstract canFinishGame(): boolean;
   abstract calculateNextMove(): { [key in keyof typeof MOVES]: number } | null;
   abstract calculatePlacements(): { [key: number]: number };
@@ -331,8 +335,12 @@ class HurdleGameState extends GameState {
     return this.map.split("#").length - 1;
   }
 
-  hasGoldOrSilver(): boolean {
-    return scoreKeeper.myPlayerScore.hurdleMedals.hasGoldOrSilver();
+  hasGoldMedal(): boolean {
+    return scoreKeeper.myPlayerScore.hurdleMedals.gold > 0;
+  }
+
+  hasSilverMedal(): boolean {
+    return scoreKeeper.myPlayerScore.hurdleMedals.silver > 0;
   }
 
   canFinishGame(): boolean {
@@ -568,8 +576,12 @@ class ArcheryGameState extends GameState {
     return this.windPower.length;
   }
 
-  hasGoldOrSilver(): boolean {
-    return scoreKeeper.myPlayerScore.archeryMedals.hasGoldOrSilver();
+  hasGoldMedal(): boolean {
+    return scoreKeeper.myPlayerScore.archeryMedals.gold > 0;
+  }
+
+  hasSilverMedal(): boolean {
+    return scoreKeeper.myPlayerScore.archeryMedals.silver > 0;
   }
 
   canFinishGame(): boolean {
@@ -663,6 +675,10 @@ class RollerSkateActor {
     this.spacesTravelled = spacesTravelled;
     this.riskOrStunTimer = riskOrStunTimer;
   }
+
+  isStunned(): boolean {
+    return this.riskOrStunTimer < 0;
+  }
 }
 
 class RollerSkateGameState extends GameState {
@@ -714,8 +730,12 @@ class RollerSkateGameState extends GameState {
     return this.skatingTurnsLeft;
   }
 
-  hasGoldOrSilver(): boolean {
-    return scoreKeeper.myPlayerScore.rollerSkateMedals.hasGoldOrSilver();
+  hasGoldMedal(): boolean {
+    return scoreKeeper.myPlayerScore.rollerSkateMedals.gold > 0;
+  }
+
+  hasSilverMedal(): boolean {
+    return scoreKeeper.myPlayerScore.rollerSkateMedals.silver > 0;
   }
 
   canFinishGame(): boolean {
@@ -791,7 +811,7 @@ class RollerSkateGameState extends GameState {
   }
 
   calculateNextMove() {
-    if (this.isGameOver || this.myPlayer.riskOrStunTimer < 0) {
+    if (this.isGameOver || this.myPlayer.isStunned()) {
       return null;
     }
 
@@ -801,6 +821,7 @@ class RollerSkateGameState extends GameState {
       [MOVES.UP]: 0,
       [MOVES.DOWN]: 0,
     };
+
     for (let i = 0; i < this.riskOrder.length; i++) {
       const riskOrderMove = this.riskOrder[i];
       const move = this.convertRiskToMove(riskOrderMove);
@@ -809,9 +830,20 @@ class RollerSkateGameState extends GameState {
       }
       const moveCost = this.costOfRisk[i];
       const riskSpacesTravelled = this.riskSpacesTravelled[i];
+      const finalPosition = this.myPlayer.spacesTravelled + riskSpacesTravelled;
       const totalMoveCost = this.myPlayer.riskOrStunTimer + moveCost;
       if (totalMoveCost >= this.MAX_RISK_ALLOWED) {
-        moves[move] = 5;
+        moves[move] = STUNNED_WEIGHT;
+      } else if (
+        this.enemyPlayer1.isStunned() &&
+        finalPosition % 10 === this.enemyPlayer1.spacesTravelled % 10
+      ) {
+        moves[move] = STUNNED_WEIGHT;
+      } else if (
+        this.enemyPlayer2.isStunned() &&
+        finalPosition % 10 === this.enemyPlayer2.spacesTravelled % 10
+      ) {
+        moves[move] = STUNNED_WEIGHT;
       } else {
         moves[move] = totalMoveCost - riskSpacesTravelled;
       }
@@ -876,8 +908,12 @@ class DivingGameState extends GameState {
     return this.divingGoal.length;
   }
 
-  hasGoldOrSilver(): boolean {
-    return scoreKeeper.myPlayerScore.divingMedals.hasGoldOrSilver();
+  hasGoldMedal(): boolean {
+    return scoreKeeper.myPlayerScore.divingMedals.gold > 0;
+  }
+
+  hasSilverMedal(): boolean {
+    return scoreKeeper.myPlayerScore.divingMedals.silver > 0;
   }
 
   canFinishGame(): boolean {
@@ -928,10 +964,13 @@ class DivingGameState extends GameState {
     };
   }
 
+  calculateNextPlacement() {}
+
   calculateNextMove() {
     if (this.isGameOver) {
       return null;
     }
+    const currentPlacement = this.myCurrentPlacement;
     const move = this.divingGoal[0];
     switch (move) {
       case "U":
@@ -989,11 +1028,12 @@ function decideMove(gameStates: GameState[] | null) {
     return MOVES.LEFT;
   }
 
-  // const priorityGames = allGames.filter((game) => !game.hasGoldOrSilver());
+  const priorityGames =
+    turn >= 50 ? allGames.filter((game) => !game.hasGoldMedal()) : allGames;
   // const priorityGames = allGames.filter(
   //   (game) => game instanceof ArcheryGameState
   // );
-  const games = allGames; // priorityGames.length > 0 ? priorityGames : allGames;
+  const games = priorityGames.length > 0 ? priorityGames : allGames;
 
   const movesToDecideFrom: {
     readonly LEFT: number;
@@ -1004,13 +1044,13 @@ function decideMove(gameStates: GameState[] | null) {
   for (const game of games) {
     const moves = game.calculateNextMove();
     if (moves) {
-      // const weightedMoves = weightMoves({
-      //   moves,
-      //   turnsLeft: game.turnsLeftInGame,
-      //   currentPlacement: game.myCurrentPlacement,
-      //   needsMedal: game.hasGoldOrSilver(),
-      // });
-      const weightedMoves = moves;
+      const weightedMoves = weightMoves({
+        moves,
+        turnsLeft: game.turnsLeftInGame,
+        currentPlacement: game.myCurrentPlacement,
+        hasGoldMedal: game.hasGoldMedal(),
+        hasSilverMedal: game.hasSilverMedal(),
+      });
       console.error(`weightedMoves: ${JSON.stringify(weightedMoves)}`);
       movesToDecideFrom.push(weightedMoves);
     }
