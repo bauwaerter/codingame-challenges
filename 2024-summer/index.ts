@@ -477,6 +477,9 @@ class HurdleGameState extends GameState {
     correctSpacesTravelled: number,
     willStun: boolean
   ) {
+    if (willStun) {
+      return 4;
+    }
     const myNextPosition = willStun
       ? this.myPlayer.position
       : this.myPlayer.position + incorrectSpacesTravelled;
@@ -508,6 +511,16 @@ class HurdleGameState extends GameState {
     if (!splitMap || splitMap.length === 0 || this.currentlyStunned) {
       return null;
     }
+    console.error(this.map);
+
+    if (!this.map.includes("#")) {
+      return {
+        [MOVES.RIGHT]: this.calculateCorrectMove(3),
+        [MOVES.LEFT]: this.calculateIncorrectMove(0, 3, false),
+        [MOVES.UP]: this.calculateIncorrectMove(1, 3, false),
+        [MOVES.DOWN]: this.calculateIncorrectMove(1, 3, false),
+      };
+    }
 
     for (let chunk = 0; chunk < splitMap.length; chunk++) {
       const isLastChunk = chunk === splitMap.length;
@@ -517,7 +530,7 @@ class HurdleGameState extends GameState {
       if (currentChunk === "..." && nextChunk?.charAt(0) !== "#") {
         return {
           [MOVES.RIGHT]: this.calculateCorrectMove(3),
-          [MOVES.LEFT]: this.calculateIncorrectMove(2, 3, false),
+          [MOVES.LEFT]: this.calculateIncorrectMove(0, 3, false),
           [MOVES.UP]: this.calculateIncorrectMove(1, 3, false),
           [MOVES.DOWN]: this.calculateIncorrectMove(1, 3, false),
         };
@@ -534,27 +547,6 @@ class HurdleGameState extends GameState {
           [MOVES.LEFT]: this.calculateIncorrectMove(1, 2, true),
           [MOVES.UP]: this.calculateCorrectMove(2),
           [MOVES.DOWN]: this.calculateIncorrectMove(2, 2, true),
-        };
-      } else if (currentChunk === "..." && nextChunk === null) {
-        return {
-          [MOVES.RIGHT]: this.calculateCorrectMove(3),
-          [MOVES.LEFT]: this.calculateIncorrectMove(1, 3, false),
-          [MOVES.UP]: this.calculateIncorrectMove(2, 3, false),
-          [MOVES.DOWN]: this.calculateIncorrectMove(2, 3, false),
-        };
-      } else if (currentChunk === ".." && nextChunk === null) {
-        return {
-          [MOVES.RIGHT]: this.calculateCorrectMove(3),
-          [MOVES.LEFT]: this.calculateIncorrectMove(1, 2, false),
-          [MOVES.UP]: this.calculateCorrectMove(2),
-          [MOVES.DOWN]: this.calculateCorrectMove(2),
-        };
-      } else if (currentChunk === "." && nextChunk === null) {
-        return {
-          [MOVES.RIGHT]: this.calculateCorrectMove(3),
-          [MOVES.LEFT]: this.calculateCorrectMove(1),
-          [MOVES.UP]: this.calculateCorrectMove(2),
-          [MOVES.DOWN]: this.calculateCorrectMove(2),
         };
       } else {
         return {
@@ -1050,14 +1042,14 @@ class DivingGameState extends GameState {
       myForecastedScore >= enemyPlayer1ForecastedScore &&
       myForecastedScore >= enemyPlayer2ForecastedScore
     ) {
-      return 1;
+      return 0;
     } else if (
       myForecastedScore >= enemyPlayer1ForecastedScore ||
       myForecastedScore >= enemyPlayer2ForecastedScore
     ) {
-      return 2;
+      return 1;
     } else {
-      return 3;
+      return 2;
     }
   }
 
@@ -1160,7 +1152,12 @@ function decideMove(gameStates: GameState[] | null) {
     return MOVES.LEFT;
   }
 
-  const games = allGames;
+  const priorityGames = allGames.filter(
+    (gameState) =>
+      gameState instanceof HurdleGameState ||
+      gameState instanceof DivingGameState
+  );
+  const games = priorityGames.length > 0 ? priorityGames : allGames;
 
   const movesToDecideFrom: {
     readonly LEFT: number;
