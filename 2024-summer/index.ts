@@ -9,7 +9,6 @@ const enemyPlayer2Idx: number = (myPlayerIdx + 2) % 3;
 const nbGames: number = parseInt(readline());
 
 const TOTAL_TURNS = 100;
-const STUNNED_WEIGHT = 5;
 let turn = 1;
 
 class MedalCounts {
@@ -197,24 +196,24 @@ const MOVES = {
   UP: "UP",
 } as const;
 
-function weightMoves({
-  moves,
-  turnsLeft,
-  currentPlacement,
-  hasGoldMedal,
-  hasSilverMedal,
-}: {
-  moves: { [key in keyof typeof MOVES]: number };
-  turnsLeft: number;
-  currentPlacement: number;
-  hasGoldMedal: boolean;
-  hasSilverMedal: boolean;
-}): { [key in keyof typeof MOVES]: number } {
-  for (const [key, value] of Object.entries(moves)) {
-    moves[key] = value;
-  }
-  return moves;
-}
+// function weightMoves({
+//   moves,
+//   turnsLeft,
+//   currentPlacement,
+//   hasGoldMedal,
+//   hasSilverMedal,
+// }: {
+//   moves: { [key in keyof typeof MOVES]: number };
+//   turnsLeft: number;
+//   currentPlacement: number;
+//   hasGoldMedal: boolean;
+//   hasSilverMedal: boolean;
+// }): { [key in keyof typeof MOVES]: number } {
+//   for (const [key, value] of Object.entries(moves)) {
+//     moves[key] = value + turnsLeft;
+//   }
+//   return moves;
+// }
 
 function chunkString(str: string, length: number): RegExpMatchArray | null {
   return str.match(new RegExp(".{1," + length + "}", "g"));
@@ -282,6 +281,7 @@ class HurdleActor {
 
 class HurdleGameState extends GameState {
   private MAP_LENGTH = 30;
+  private STUN_TIMER = 3;
   map: string;
   myPlayer: HurdleActor;
   enemyPlayer1: HurdleActor;
@@ -377,12 +377,10 @@ class HurdleGameState extends GameState {
     };
 
     const getCurrentPlacement = (playerIdx: number) => {
-      if (currentPositions[playerIdx] === leader) {
+      if (currentPositions[playerIdx] >= leader) {
         return 1;
-      } else if (currentPositions[playerIdx] === middle) {
+      } else if (currentPositions[playerIdx] >= middle) {
         return 2;
-      } else if (currentPositions[playerIdx] === loser) {
-        return 3;
       } else {
         return 3;
       }
@@ -419,17 +417,17 @@ class HurdleGameState extends GameState {
         });
       } else if (currentChunk === "..." && nextChunk?.charAt(0) === "#") {
         moves.push({
-          [MOVES.RIGHT]: 5,
+          [MOVES.RIGHT]: 10,
           [MOVES.LEFT]: 1,
           [MOVES.UP]: 0,
           [MOVES.DOWN]: 0,
         });
       } else if (currentChunk === ".#.") {
         moves.push({
-          [MOVES.RIGHT]: 5,
-          [MOVES.LEFT]: 5,
+          [MOVES.RIGHT]: 10,
+          [MOVES.LEFT]: 10,
           [MOVES.UP]: 0,
-          [MOVES.DOWN]: 5,
+          [MOVES.DOWN]: 10,
         });
       } else {
         moves.push({
@@ -445,6 +443,63 @@ class HurdleGameState extends GameState {
     return moves;
   }
 
+  calculateCostOfMoves(spacesTravelled: number, willStun: boolean) {
+    if (willStun) {
+      return this.map.length - spacesTravelled + this.STUN_TIMER * 3;
+    }
+    return this.map.length - spacesTravelled;
+  }
+
+  calculateCorrectMove(correctSpacesTravelled: number) {
+    const myNextPosition = this.myPlayer.position + correctSpacesTravelled;
+    const enemy1NextPosition =
+      this.enemyPlayer1.position + correctSpacesTravelled;
+    const enemy2NextPosition =
+      this.enemyPlayer2.position + correctSpacesTravelled;
+
+    if (
+      myNextPosition >= enemy1NextPosition &&
+      myNextPosition >= enemy2NextPosition
+    ) {
+      return 1;
+    }
+    if (
+      myNextPosition >= enemy1NextPosition ||
+      myNextPosition >= enemy2NextPosition
+    ) {
+      return 2;
+    }
+    return 3;
+  }
+
+  calculateIncorrectMove(
+    incorrectSpacesTravelled: number,
+    correctSpacesTravelled: number,
+    willStun: boolean
+  ) {
+    const myNextPosition = willStun
+      ? this.myPlayer.position
+      : this.myPlayer.position + incorrectSpacesTravelled;
+    const enemy1NextPosition =
+      this.enemyPlayer1.position + correctSpacesTravelled;
+    const enemy2NextPosition =
+      this.enemyPlayer2.position + correctSpacesTravelled;
+
+    if (
+      myNextPosition >= enemy1NextPosition &&
+      myNextPosition >= enemy2NextPosition
+    ) {
+      return 1;
+    }
+    if (
+      myNextPosition >= enemy1NextPosition ||
+      myNextPosition >= enemy2NextPosition
+    ) {
+      return 2;
+    }
+    return 3;
+  }
+
   calculateNextMove() {
     if (this.isGameOver) {
       return null;
@@ -453,6 +508,7 @@ class HurdleGameState extends GameState {
     if (!splitMap || splitMap.length === 0 || this.currentlyStunned) {
       return null;
     }
+
     for (let chunk = 0; chunk < splitMap.length; chunk++) {
       const isLastChunk = chunk === splitMap.length;
       const currentChunk = splitMap[chunk];
@@ -460,52 +516,52 @@ class HurdleGameState extends GameState {
 
       if (currentChunk === "..." && nextChunk?.charAt(0) !== "#") {
         return {
-          [MOVES.RIGHT]: -2,
-          [MOVES.LEFT]: 2,
-          [MOVES.UP]: 1,
-          [MOVES.DOWN]: 1,
+          [MOVES.RIGHT]: this.calculateCorrectMove(3),
+          [MOVES.LEFT]: this.calculateIncorrectMove(2, 3, false),
+          [MOVES.UP]: this.calculateIncorrectMove(1, 3, false),
+          [MOVES.DOWN]: this.calculateIncorrectMove(1, 3, false),
         };
       } else if (currentChunk === "..." && nextChunk?.charAt(0) === "#") {
         return {
-          [MOVES.RIGHT]: 5,
-          [MOVES.LEFT]: 1,
-          [MOVES.UP]: 0,
-          [MOVES.DOWN]: 0,
+          [MOVES.RIGHT]: this.calculateIncorrectMove(3, 2, true),
+          [MOVES.LEFT]: this.calculateIncorrectMove(1, 2, false),
+          [MOVES.UP]: this.calculateCorrectMove(2),
+          [MOVES.DOWN]: this.calculateCorrectMove(2),
         };
       } else if (currentChunk === ".#.") {
         return {
-          [MOVES.RIGHT]: 5,
-          [MOVES.LEFT]: 5,
-          [MOVES.UP]: 0,
-          [MOVES.DOWN]: 5,
+          [MOVES.RIGHT]: this.calculateIncorrectMove(3, 2, true),
+          [MOVES.LEFT]: this.calculateIncorrectMove(1, 2, true),
+          [MOVES.UP]: this.calculateCorrectMove(2),
+          [MOVES.DOWN]: this.calculateIncorrectMove(2, 2, true),
         };
       } else if (currentChunk === "..." && nextChunk === null) {
         return {
-          [MOVES.RIGHT]: 0,
-          [MOVES.LEFT]: 3,
-          [MOVES.UP]: 2,
-          [MOVES.DOWN]: 2,
+          [MOVES.RIGHT]: this.calculateCorrectMove(3),
+          [MOVES.LEFT]: this.calculateIncorrectMove(1, 3, false),
+          [MOVES.UP]: this.calculateIncorrectMove(2, 3, false),
+          [MOVES.DOWN]: this.calculateIncorrectMove(2, 3, false),
         };
       } else if (currentChunk === ".." && nextChunk === null) {
         return {
-          [MOVES.RIGHT]: 0,
-          [MOVES.LEFT]: 2,
-          [MOVES.UP]: 0,
-          [MOVES.DOWN]: 0,
+          [MOVES.RIGHT]: this.calculateCorrectMove(3),
+          [MOVES.LEFT]: this.calculateIncorrectMove(1, 2, false),
+          [MOVES.UP]: this.calculateCorrectMove(2),
+          [MOVES.DOWN]: this.calculateCorrectMove(2),
         };
       } else if (currentChunk === "." && nextChunk === null) {
         return {
-          [MOVES.RIGHT]: 0,
-          [MOVES.LEFT]: 0,
-          [MOVES.UP]: 0,
-          [MOVES.DOWN]: 0,
+          [MOVES.RIGHT]: this.calculateCorrectMove(3),
+          [MOVES.LEFT]: this.calculateCorrectMove(1),
+          [MOVES.UP]: this.calculateCorrectMove(2),
+          [MOVES.DOWN]: this.calculateCorrectMove(2),
         };
       } else {
         return {
-          [MOVES.RIGHT]: 1,
-          [MOVES.LEFT]: 0,
-          [MOVES.UP]: 1,
-          [MOVES.DOWN]: 1,
+          [MOVES.RIGHT]: this.calculateCorrectMove(3),
+          [MOVES.LEFT]: this.calculateCorrectMove(1),
+          [MOVES.UP]: this.calculateCorrectMove(2),
+          [MOVES.DOWN]: this.calculateCorrectMove(2),
         };
       }
     }
@@ -614,12 +670,10 @@ class ArcheryGameState extends GameState {
     };
 
     const getCurrentPlacement = (playerIdx: number) => {
-      if (currentPositions[playerIdx] === leader) {
+      if (currentPositions[playerIdx] >= leader) {
         return 1;
-      } else if (currentPositions[playerIdx] === middle) {
+      } else if (currentPositions[playerIdx] >= middle) {
         return 2;
-      } else if (currentPositions[playerIdx] === loser) {
-        return 3;
       } else {
         return 3;
       }
@@ -682,6 +736,7 @@ class RollerSkateActor {
 }
 
 class RollerSkateGameState extends GameState {
+  private STUN_TIMER = 2;
   riskOrder: string;
   skatingTurnsLeft: number;
   myPlayer: RollerSkateActor;
@@ -777,12 +832,10 @@ class RollerSkateGameState extends GameState {
     };
 
     const getCurrentPlacement = (playerIdx: number) => {
-      if (currentPositions[playerIdx] === leader) {
+      if (currentPositions[playerIdx] >= leader) {
         return 1;
-      } else if (currentPositions[playerIdx] === middle) {
+      } else if (currentPositions[playerIdx] >= middle) {
         return 2;
-      } else if (currentPositions[playerIdx] === loser) {
-        return 3;
       } else {
         return 3;
       }
@@ -833,17 +886,17 @@ class RollerSkateGameState extends GameState {
       const finalPosition = this.myPlayer.spacesTravelled + riskSpacesTravelled;
       const totalMoveCost = this.myPlayer.riskOrStunTimer + moveCost;
       if (totalMoveCost >= this.MAX_RISK_ALLOWED) {
-        moves[move] = STUNNED_WEIGHT;
+        moves[move] = this.STUN_TIMER * 3;
       } else if (
         this.enemyPlayer1.isStunned() &&
         finalPosition % 10 === this.enemyPlayer1.spacesTravelled % 10
       ) {
-        moves[move] = STUNNED_WEIGHT;
+        moves[move] = this.STUN_TIMER * 3;
       } else if (
         this.enemyPlayer2.isStunned() &&
         finalPosition % 10 === this.enemyPlayer2.spacesTravelled % 10
       ) {
-        moves[move] = STUNNED_WEIGHT;
+        moves[move] = this.STUN_TIMER * 3;
       } else {
         moves[move] = totalMoveCost - riskSpacesTravelled;
       }
@@ -868,6 +921,17 @@ class DivingActor {
   constructor(points: number, combo: number) {
     this.points = points;
     this.combo = combo;
+  }
+
+  getFinalScore(movesLeft: number): number {
+    let finalScore = this.points;
+    let currentCombo = this.combo + 1;
+    while (movesLeft > 0) {
+      finalScore += currentCombo;
+      currentCombo++;
+      movesLeft--;
+    }
+    return finalScore;
   }
 }
 
@@ -946,12 +1010,10 @@ class DivingGameState extends GameState {
     };
 
     const getCurrentPlacement = (playerIdx: number) => {
-      if (currentPositions[playerIdx] === leader) {
+      if (currentPositions[playerIdx] >= leader) {
         return 1;
-      } else if (currentPositions[playerIdx] === middle) {
+      } else if (currentPositions[playerIdx] >= middle) {
         return 2;
-      } else if (currentPositions[playerIdx] === loser) {
-        return 3;
       } else {
         return 3;
       }
@@ -964,42 +1026,112 @@ class DivingGameState extends GameState {
     };
   }
 
-  calculateNextPlacement() {}
+  getPossiblePointsLeft(movesLeft: number, currentCombo: number) {
+    let possiblePoints = 0;
+    let currentCom = currentCombo + 1;
+    while (movesLeft > 0) {
+      possiblePoints += currentCom;
+      currentCom++;
+      movesLeft--;
+    }
+    return possiblePoints;
+  }
+
+  getForecastedPlacement({
+    myForecastedScore,
+    enemyPlayer1ForecastedScore,
+    enemyPlayer2ForecastedScore,
+  }: {
+    myForecastedScore: number;
+    enemyPlayer1ForecastedScore: number;
+    enemyPlayer2ForecastedScore: number;
+  }) {
+    if (
+      myForecastedScore >= enemyPlayer1ForecastedScore &&
+      myForecastedScore >= enemyPlayer2ForecastedScore
+    ) {
+      return 1;
+    } else if (
+      myForecastedScore >= enemyPlayer1ForecastedScore ||
+      myForecastedScore >= enemyPlayer2ForecastedScore
+    ) {
+      return 2;
+    } else {
+      return 3;
+    }
+  }
+
+  calculateCorrectMove() {
+    const myFinalScore =
+      this.myPlayer.points +
+      this.getPossiblePointsLeft(this.turnsLeftInGame, this.myPlayer.combo);
+    const enemyPlayer1FinalScore =
+      this.enemyPlayer1.points +
+      this.getPossiblePointsLeft(this.turnsLeftInGame, this.enemyPlayer1.combo);
+    const enemyPlayer2FinalScore =
+      this.enemyPlayer2.points +
+      this.getPossiblePointsLeft(this.turnsLeftInGame, this.enemyPlayer2.combo);
+
+    return this.getForecastedPlacement({
+      myForecastedScore: myFinalScore,
+      enemyPlayer1ForecastedScore: enemyPlayer1FinalScore,
+      enemyPlayer2ForecastedScore: enemyPlayer2FinalScore,
+    });
+  }
+
+  calculateIncorrectMove() {
+    const myFinalScore =
+      this.myPlayer.points +
+      this.getPossiblePointsLeft(this.turnsLeftInGame - 1, 0);
+    const enemyPlayer1FinalScore =
+      this.enemyPlayer1.points +
+      this.getPossiblePointsLeft(this.turnsLeftInGame, this.enemyPlayer1.combo);
+    const enemyPlayer2FinalScore =
+      this.enemyPlayer2.points +
+      this.getPossiblePointsLeft(this.turnsLeftInGame, this.enemyPlayer2.combo);
+
+    return this.getForecastedPlacement({
+      myForecastedScore: myFinalScore,
+      enemyPlayer1ForecastedScore: enemyPlayer1FinalScore,
+      enemyPlayer2ForecastedScore: enemyPlayer2FinalScore,
+    });
+  }
 
   calculateNextMove() {
     if (this.isGameOver) {
       return null;
     }
-    const currentPlacement = this.myCurrentPlacement;
+    const correctMoveWeight = this.calculateCorrectMove();
+    const incorrectMoveWeight = this.calculateIncorrectMove();
     const move = this.divingGoal[0];
     switch (move) {
       case "U":
         return {
-          [MOVES.RIGHT]: 2,
-          [MOVES.LEFT]: 2,
-          [MOVES.UP]: 0,
-          [MOVES.DOWN]: 2,
+          [MOVES.RIGHT]: incorrectMoveWeight,
+          [MOVES.LEFT]: incorrectMoveWeight,
+          [MOVES.UP]: correctMoveWeight,
+          [MOVES.DOWN]: incorrectMoveWeight,
         };
       case "D":
         return {
-          [MOVES.RIGHT]: 2,
-          [MOVES.LEFT]: 2,
-          [MOVES.UP]: 2,
-          [MOVES.DOWN]: 0,
+          [MOVES.RIGHT]: incorrectMoveWeight,
+          [MOVES.LEFT]: incorrectMoveWeight,
+          [MOVES.UP]: incorrectMoveWeight,
+          [MOVES.DOWN]: correctMoveWeight,
         };
       case "L":
         return {
-          [MOVES.RIGHT]: 2,
-          [MOVES.LEFT]: 0,
-          [MOVES.UP]: 2,
-          [MOVES.DOWN]: 2,
+          [MOVES.RIGHT]: incorrectMoveWeight,
+          [MOVES.LEFT]: correctMoveWeight,
+          [MOVES.UP]: incorrectMoveWeight,
+          [MOVES.DOWN]: incorrectMoveWeight,
         };
       case "R":
         return {
-          [MOVES.RIGHT]: 0,
-          [MOVES.LEFT]: 2,
-          [MOVES.UP]: 2,
-          [MOVES.DOWN]: 2,
+          [MOVES.RIGHT]: correctMoveWeight,
+          [MOVES.LEFT]: incorrectMoveWeight,
+          [MOVES.UP]: incorrectMoveWeight,
+          [MOVES.DOWN]: incorrectMoveWeight,
         };
       default:
         return null;
@@ -1028,12 +1160,7 @@ function decideMove(gameStates: GameState[] | null) {
     return MOVES.LEFT;
   }
 
-  const priorityGames =
-    turn >= 50 ? allGames.filter((game) => !game.hasGoldMedal()) : allGames;
-  // const priorityGames = allGames.filter(
-  //   (game) => game instanceof ArcheryGameState
-  // );
-  const games = priorityGames.length > 0 ? priorityGames : allGames;
+  const games = allGames;
 
   const movesToDecideFrom: {
     readonly LEFT: number;
@@ -1041,16 +1168,18 @@ function decideMove(gameStates: GameState[] | null) {
     readonly RIGHT: number;
     readonly UP: number;
   }[] = [];
+
   for (const game of games) {
     const moves = game.calculateNextMove();
     if (moves) {
-      const weightedMoves = weightMoves({
-        moves,
-        turnsLeft: game.turnsLeftInGame,
-        currentPlacement: game.myCurrentPlacement,
-        hasGoldMedal: game.hasGoldMedal(),
-        hasSilverMedal: game.hasSilverMedal(),
-      });
+      // const weightedMoves = weightMoves({
+      //   moves,
+      //   turnsLeft: game.turnsLeftInGame,
+      //   currentPlacement: game.myCurrentPlacement,
+      //   hasGoldMedal: game.hasGoldMedal(),
+      //   hasSilverMedal: game.hasSilverMedal(),
+      // });
+      const weightedMoves = moves;
       console.error(`weightedMoves: ${JSON.stringify(weightedMoves)}`);
       movesToDecideFrom.push(weightedMoves);
     }
