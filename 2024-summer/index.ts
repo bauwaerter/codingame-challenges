@@ -211,7 +211,7 @@ function weightMoves({
   hasSilverMedal: boolean;
 }): { [key in keyof typeof MOVES]: number } {
   for (const [key, value] of Object.entries(moves)) {
-    moves[key] = value;
+    moves[key] = value + currentPlacement * -2 + (hasGoldMedal ? 21 : -21);
   }
   return moves;
 }
@@ -964,42 +964,112 @@ class DivingGameState extends GameState {
     };
   }
 
-  calculateNextPlacement() {}
+  getForecastedPlacement({
+    myForecastedScore,
+    enemyPlayer1ForecastedScore,
+    enemyPlayer2ForecastedScore,
+  }: {
+    myForecastedScore: number;
+    enemyPlayer1ForecastedScore: number;
+    enemyPlayer2ForecastedScore: number;
+  }) {
+    if (
+      myForecastedScore >= enemyPlayer1ForecastedScore &&
+      myForecastedScore >= enemyPlayer2ForecastedScore
+    ) {
+      return -5;
+    } else if (
+      myForecastedScore >= enemyPlayer1ForecastedScore ||
+      myForecastedScore >= enemyPlayer2ForecastedScore
+    ) {
+      return 0;
+    } else {
+      return 3;
+    }
+  }
+
+  getPossiblePointsLeft(movesLeft: number, currentCombo: number) {
+    let possiblePoints = 0;
+    let currentCom = currentCombo + 1;
+    while (movesLeft > 0) {
+      possiblePoints += currentCom;
+      currentCom++;
+      movesLeft--;
+    }
+    return possiblePoints;
+  }
+
+  calculateCorrectMove() {
+    const myFinalScore =
+      this.myPlayer.points +
+      this.getPossiblePointsLeft(this.turnsLeftInGame, this.myPlayer.combo);
+    const enemyPlayer1FinalScore =
+      this.enemyPlayer1.points +
+      this.getPossiblePointsLeft(this.turnsLeftInGame, this.enemyPlayer1.combo);
+    const enemyPlayer2FinalScore =
+      this.enemyPlayer2.points +
+      this.getPossiblePointsLeft(this.turnsLeftInGame, this.enemyPlayer2.combo);
+
+    return this.getForecastedPlacement({
+      myForecastedScore: myFinalScore,
+      enemyPlayer1ForecastedScore: enemyPlayer1FinalScore,
+      enemyPlayer2ForecastedScore: enemyPlayer2FinalScore,
+    });
+  }
+
+  calculateIncorrectMove() {
+    const myFinalScore =
+      this.myPlayer.points +
+      this.getPossiblePointsLeft(this.turnsLeftInGame - 1, 0);
+    const enemyPlayer1FinalScore =
+      this.enemyPlayer1.points +
+      this.getPossiblePointsLeft(this.turnsLeftInGame, this.enemyPlayer1.combo);
+    const enemyPlayer2FinalScore =
+      this.enemyPlayer2.points +
+      this.getPossiblePointsLeft(this.turnsLeftInGame, this.enemyPlayer2.combo);
+
+    return this.getForecastedPlacement({
+      myForecastedScore: myFinalScore,
+      enemyPlayer1ForecastedScore: enemyPlayer1FinalScore,
+      enemyPlayer2ForecastedScore: enemyPlayer2FinalScore,
+    });
+  }
 
   calculateNextMove() {
     if (this.isGameOver) {
       return null;
     }
-    const currentPlacement = this.myCurrentPlacement;
+    const correctMoveWeight = this.calculateCorrectMove();
+    const incorrectMoveWeight = this.calculateIncorrectMove();
     const move = this.divingGoal[0];
     switch (move) {
       case "U":
         return {
-          [MOVES.RIGHT]: 2,
-          [MOVES.LEFT]: 2,
-          [MOVES.UP]: 0,
-          [MOVES.DOWN]: 2,
+          [MOVES.RIGHT]: incorrectMoveWeight,
+          [MOVES.LEFT]: incorrectMoveWeight,
+          [MOVES.UP]: correctMoveWeight,
+          [MOVES.DOWN]: incorrectMoveWeight,
         };
       case "D":
         return {
-          [MOVES.RIGHT]: 2,
-          [MOVES.LEFT]: 2,
-          [MOVES.UP]: 2,
-          [MOVES.DOWN]: 0,
+          [MOVES.RIGHT]: incorrectMoveWeight,
+          [MOVES.LEFT]: incorrectMoveWeight,
+          [MOVES.UP]: incorrectMoveWeight,
+          [MOVES.DOWN]: correctMoveWeight,
         };
       case "L":
         return {
-          [MOVES.RIGHT]: 2,
-          [MOVES.LEFT]: 0,
-          [MOVES.UP]: 2,
-          [MOVES.DOWN]: 2,
+          [MOVES.RIGHT]: incorrectMoveWeight,
+          [MOVES.LEFT]: correctMoveWeight,
+          [MOVES.UP]: incorrectMoveWeight,
+          [MOVES.DOWN]: incorrectMoveWeight,
         };
       case "R":
         return {
-          [MOVES.RIGHT]: 0,
-          [MOVES.LEFT]: 2,
-          [MOVES.UP]: 2,
-          [MOVES.DOWN]: 2,
+          [MOVES.RIGHT]: correctMoveWeight,
+          [MOVES.LEFT]: incorrectMoveWeight,
+          [MOVES.UP]: incorrectMoveWeight,
+          [MOVES.DOWN]: incorrectMoveWeight,
         };
       default:
         return null;
@@ -1028,12 +1098,11 @@ function decideMove(gameStates: GameState[] | null) {
     return MOVES.LEFT;
   }
 
-  const priorityGames =
-    turn >= 50 ? allGames.filter((game) => !game.hasGoldMedal()) : allGames;
+  //  const priorityGames = allGames.filter((game) => !game.hasGoldMedal());
   // const priorityGames = allGames.filter(
   //   (game) => game instanceof ArcheryGameState
   // );
-  const games = priorityGames.length > 0 ? priorityGames : allGames;
+  const games = allGames; //priorityGames.length > 0 ? priorityGames : allGames;
 
   const movesToDecideFrom: {
     readonly LEFT: number;
