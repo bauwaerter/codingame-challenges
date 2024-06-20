@@ -9,7 +9,6 @@ const enemyPlayer2Idx: number = (myPlayerIdx + 2) % 3;
 const nbGames: number = parseInt(readline());
 
 const TOTAL_TURNS = 100;
-const STUNNED_WEIGHT = 5;
 let turn = 1;
 
 class MedalCounts {
@@ -211,13 +210,29 @@ function weightMoves({
   hasSilverMedal: boolean;
 }): { [key in keyof typeof MOVES]: number } {
   for (const [key, value] of Object.entries(moves)) {
-    moves[key] = value + currentPlacement * -2 + (hasGoldMedal ? 21 : -21);
+    moves[key] = value + (hasGoldMedal ? 3 : -5);
+    // moves[key] = value;
   }
   return moves;
 }
 
 function chunkString(str: string, length: number): RegExpMatchArray | null {
   return str.match(new RegExp(".{1," + length + "}", "g"));
+}
+
+class Weight {
+  static readonly BEST = 0;
+  static readonly GOOD = 1;
+  static readonly BAD = 2;
+  static readonly WORST = 3;
+
+  static getStunnedWeight(
+    stunTimer: number,
+    maxDistancePerTurn: number,
+    currentPlacement: number
+  ): number {
+    return stunTimer + maxDistancePerTurn + currentPlacement;
+  }
 }
 
 type GameStateArgs = {
@@ -282,6 +297,9 @@ class HurdleActor {
 
 class HurdleGameState extends GameState {
   private MAP_LENGTH = 30;
+  private STUN_TIMER = 3;
+  private MAX_DISTANCE_PER_TURN = 3;
+
   map: string;
   myPlayer: HurdleActor;
   enemyPlayer1: HurdleActor;
@@ -344,11 +362,8 @@ class HurdleGameState extends GameState {
   }
 
   canFinishGame(): boolean {
-    const moves = this.calculateMoves();
-    if (!moves) {
-      return false;
-    }
-    return this.turnsLeft >= moves.length;
+    const movesLeft = this.calculateMovesLeft();
+    return this.turnsLeft >= movesLeft;
   }
 
   calculatePlacements() {
@@ -395,60 +410,59 @@ class HurdleGameState extends GameState {
     };
   }
 
-  calculateMoves() {
-    const moves: { RIGHT: number; LEFT: number; UP: number; DOWN: number }[] =
-      [];
+  calculateMovesLeft(): number {
+    let movesLeft = 0;
     if (this.isGameOver) {
-      return null;
+      return movesLeft;
     }
-    const splitMap = chunkString(this.map, 3);
-    if (!splitMap || splitMap.length === 0 || this.currentlyStunned) {
-      return null;
-    }
-    for (let chunk = 0; chunk < splitMap.length; chunk++) {
-      const isLastChunk = chunk === splitMap.length;
-      const currentChunk = splitMap[chunk];
-      const nextChunk = isLastChunk ? null : splitMap[chunk + 1];
+    const chunkSize = 3;
+    let tempMap = this.map;
 
-      if (currentChunk === "..." && nextChunk?.charAt(0) !== "#") {
-        moves.push({
-          [MOVES.RIGHT]: 0,
-          [MOVES.LEFT]: 2,
-          [MOVES.UP]: 1,
-          [MOVES.DOWN]: 1,
-        });
-      } else if (currentChunk === "..." && nextChunk?.charAt(0) === "#") {
-        moves.push({
-          [MOVES.RIGHT]: 5,
-          [MOVES.LEFT]: 1,
-          [MOVES.UP]: 0,
-          [MOVES.DOWN]: 0,
-        });
-      } else if (currentChunk === ".#.") {
-        moves.push({
-          [MOVES.RIGHT]: 5,
-          [MOVES.LEFT]: 5,
-          [MOVES.UP]: 0,
-          [MOVES.DOWN]: 5,
-        });
-      } else {
-        moves.push({
-          [MOVES.RIGHT]: 1,
-          [MOVES.LEFT]: 0,
-          [MOVES.UP]: 1,
-          [MOVES.DOWN]: 1,
-        });
+    while (tempMap.length > 0) {
+      const splitMap = chunkString(tempMap, chunkSize);
+      if (!splitMap || splitMap.length === 0) {
+        return movesLeft;
       }
-    }
-    return null;
+      const currentChunk = splitMap[0];
+      const nextChunk = splitMap[1];
 
-    return moves;
+      if (!tempMap.includes("#")) {
+        tempMap = tempMap.slice(3);
+      } else if (currentChunk === "..." && nextChunk?.charAt(0) !== "#") {
+        tempMap = tempMap.slice(3);
+      } else if (currentChunk === "..." && nextChunk?.charAt(0) === "#") {
+        tempMap = tempMap.slice(2);
+      } else if (currentChunk === ".#.") {
+        tempMap = tempMap.slice(2);
+      }
+      movesLeft++;
+    }
+
+    return movesLeft;
   }
+
+  getStunnedWeight() {
+    return Weight.getStunnedWeight(
+      this.STUN_TIMER,
+      this.MAX_DISTANCE_PER_TURN,
+      this.myCurrentPlacement
+    );
+  }
+
+  calculateCorrectMove() {}
 
   calculateNextMove() {
     if (this.isGameOver) {
       return null;
     }
+    if (!this.map.includes("#")) {
+      return {
+        [MOVES.RIGHT]: Weight.BEST,
+        [MOVES.LEFT]: Weight.BAD,
+        [MOVES.UP]: Weight.GOOD,
+        [MOVES.DOWN]: Weight.GOOD,
+      };
+    }
     const splitMap = chunkString(this.map, 3);
     if (!splitMap || splitMap.length === 0 || this.currentlyStunned) {
       return null;
@@ -460,52 +474,24 @@ class HurdleGameState extends GameState {
 
       if (currentChunk === "..." && nextChunk?.charAt(0) !== "#") {
         return {
-          [MOVES.RIGHT]: -2,
-          [MOVES.LEFT]: 2,
-          [MOVES.UP]: 1,
-          [MOVES.DOWN]: 1,
+          [MOVES.RIGHT]: Weight.BEST,
+          [MOVES.LEFT]: Weight.BAD,
+          [MOVES.UP]: Weight.GOOD,
+          [MOVES.DOWN]: Weight.GOOD,
         };
       } else if (currentChunk === "..." && nextChunk?.charAt(0) === "#") {
         return {
-          [MOVES.RIGHT]: 5,
-          [MOVES.LEFT]: 1,
-          [MOVES.UP]: 0,
-          [MOVES.DOWN]: 0,
+          [MOVES.RIGHT]: this.getStunnedWeight(),
+          [MOVES.LEFT]: Weight.WORST,
+          [MOVES.UP]: Weight.BEST,
+          [MOVES.DOWN]: Weight.BEST,
         };
       } else if (currentChunk === ".#.") {
         return {
-          [MOVES.RIGHT]: 5,
-          [MOVES.LEFT]: 5,
-          [MOVES.UP]: 0,
-          [MOVES.DOWN]: 5,
-        };
-      } else if (currentChunk === "..." && nextChunk === null) {
-        return {
-          [MOVES.RIGHT]: 0,
-          [MOVES.LEFT]: 3,
-          [MOVES.UP]: 2,
-          [MOVES.DOWN]: 2,
-        };
-      } else if (currentChunk === ".." && nextChunk === null) {
-        return {
-          [MOVES.RIGHT]: 0,
-          [MOVES.LEFT]: 2,
-          [MOVES.UP]: 0,
-          [MOVES.DOWN]: 0,
-        };
-      } else if (currentChunk === "." && nextChunk === null) {
-        return {
-          [MOVES.RIGHT]: 0,
-          [MOVES.LEFT]: 0,
-          [MOVES.UP]: 0,
-          [MOVES.DOWN]: 0,
-        };
-      } else {
-        return {
-          [MOVES.RIGHT]: 1,
-          [MOVES.LEFT]: 0,
-          [MOVES.UP]: 1,
-          [MOVES.DOWN]: 1,
+          [MOVES.RIGHT]: this.getStunnedWeight(),
+          [MOVES.LEFT]: this.getStunnedWeight(),
+          [MOVES.UP]: Weight.BEST,
+          [MOVES.DOWN]: this.getStunnedWeight(),
         };
       }
     }
@@ -632,26 +618,136 @@ class ArcheryGameState extends GameState {
     };
   }
 
+  getForecastedPlacement(
+    myDistance: number,
+    enemy1Distance: number,
+    enemy2Distance: number
+  ) {
+    if (myDistance <= enemy1Distance && myDistance <= enemy2Distance) {
+      return 3;
+    } else if (myDistance <= enemy1Distance || myDistance <= enemy2Distance) {
+      return 0;
+    } else {
+      return -5;
+    }
+  }
+
+  shouldCalculateNextMove() {
+    let total = 0;
+    let rightIndex = this.windPower.length - 1;
+    let moveNumber = 1;
+    while (total <= 20 && rightIndex >= 0) {
+      total += parseInt(this.windPower.charAt(rightIndex));
+      rightIndex--;
+      moveNumber++;
+    }
+    return moveNumber >= this.turnsLeftInGame;
+  }
+
   calculateNextMove() {
     if (this.isGameOver) {
       return null;
     }
+
     const currentWindPower = parseInt(this.windPower.charAt(0));
     if (!Number.isFinite(currentWindPower)) {
       return null;
     }
 
-    const moveRight = this.myPlayer.x + currentWindPower;
-    const moveLeft = currentWindPower - this.myPlayer.x;
-    const moveUp = currentWindPower - this.myPlayer.y;
-    const moveDown = this.myPlayer.y + currentWindPower;
+    const myMoveRightDistance = euclideanDistanceToCenter(
+      this.myPlayer.x + currentWindPower,
+      this.myPlayer.y
+    );
+    const myMoveLeftDistance = euclideanDistanceToCenter(
+      currentWindPower - this.myPlayer.x,
+      this.myPlayer.y
+    );
+    const myMoveUpDistance = euclideanDistanceToCenter(
+      this.myPlayer.x,
+      currentWindPower - this.myPlayer.y
+    );
+    const myMoveDownDistance = euclideanDistanceToCenter(
+      this.myPlayer.x,
+      this.myPlayer.y + currentWindPower
+    );
+
+    const enemyPlayer1MoveRightDistance = euclideanDistanceToCenter(
+      this.enemyPlayer1.x + currentWindPower,
+      this.enemyPlayer1.y
+    );
+    const enemyPlayer1MoveLeft = euclideanDistanceToCenter(
+      currentWindPower - this.enemyPlayer1.x,
+      this.enemyPlayer1.y
+    );
+    const enemyPlayer1MoveUp = euclideanDistanceToCenter(
+      this.enemyPlayer1.x,
+      currentWindPower - this.enemyPlayer1.y
+    );
+    const enemyPlayer1MoveDown = euclideanDistanceToCenter(
+      this.enemyPlayer1.x,
+      this.enemyPlayer1.y + currentWindPower
+    );
+    const enemy1ClosestDistance = Math.min(
+      enemyPlayer1MoveRightDistance,
+      enemyPlayer1MoveLeft,
+      enemyPlayer1MoveUp,
+      enemyPlayer1MoveDown
+    );
+
+    const enemyPlayer2MoveRightDistance = euclideanDistanceToCenter(
+      this.enemyPlayer2.x + currentWindPower,
+      this.enemyPlayer2.y
+    );
+    const enemyPlayer2MoveLeft = euclideanDistanceToCenter(
+      currentWindPower - this.enemyPlayer2.x,
+      this.enemyPlayer2.y
+    );
+    const enemyPlayer2MoveUp = euclideanDistanceToCenter(
+      this.enemyPlayer2.x,
+      currentWindPower - this.enemyPlayer2.y
+    );
+    const enemyPlayer2MoveDown = euclideanDistanceToCenter(
+      this.enemyPlayer2.x,
+      this.enemyPlayer2.y + currentWindPower
+    );
+    const enemy2ClosestDistance = Math.min(
+      enemyPlayer2MoveRightDistance,
+      enemyPlayer2MoveLeft,
+      enemyPlayer2MoveUp,
+      enemyPlayer2MoveDown
+    );
+
+    // const moves = {
+    //   [MOVES.RIGHT]: this.getForecastedPlacement(
+    //     myMoveRightDistance,
+    //     enemy1ClosestDistance,
+    //     enemy2ClosestDistance
+    //   ),
+    //   [MOVES.LEFT]: this.getForecastedPlacement(
+    //     myMoveLeftDistance,
+    //     enemy1ClosestDistance,
+    //     enemy2ClosestDistance
+    //   ),
+    //   [MOVES.UP]: this.getForecastedPlacement(
+    //     myMoveUpDistance,
+    //     enemy1ClosestDistance,
+    //     enemy2ClosestDistance
+    //   ),
+    //   [MOVES.DOWN]: this.getForecastedPlacement(
+    //     myMoveDownDistance,
+    //     enemy1ClosestDistance,
+    //     enemy2ClosestDistance
+    //   ),
+    // };
 
     const moves = {
-      [MOVES.RIGHT]: euclideanDistanceToCenter(moveRight, this.myPlayer.y),
-      [MOVES.LEFT]: euclideanDistanceToCenter(moveLeft, this.myPlayer.y),
-      [MOVES.UP]: euclideanDistanceToCenter(this.myPlayer.x, moveUp),
-      [MOVES.DOWN]: euclideanDistanceToCenter(this.myPlayer.x, moveDown),
+      [MOVES.RIGHT]: myMoveRightDistance,
+      [MOVES.LEFT]: myMoveLeftDistance,
+      [MOVES.UP]: myMoveUpDistance,
+      [MOVES.DOWN]: myMoveDownDistance,
     };
+
+    console.error(`Moves: ${JSON.stringify(moves)}`);
 
     return moves;
   }
@@ -682,6 +778,7 @@ class RollerSkateActor {
 }
 
 class RollerSkateGameState extends GameState {
+  private STUN_TIMER = 2 + 3;
   riskOrder: string;
   skatingTurnsLeft: number;
   myPlayer: RollerSkateActor;
@@ -810,8 +907,23 @@ class RollerSkateGameState extends GameState {
     }
   }
 
+  willWinGame() {
+    const totalPossibleSpacesLeft = this.turnsLeftInGame * 3;
+
+    const enemy1TotalPossibleSpacesTravelled =
+      this.enemyPlayer1.spacesTravelled + totalPossibleSpacesLeft;
+
+    const enemy2TotalPossibleSpacesTravelled =
+      this.enemyPlayer2.spacesTravelled + totalPossibleSpacesLeft;
+
+    return (
+      this.myPlayer.spacesTravelled >= enemy1TotalPossibleSpacesTravelled &&
+      this.myPlayer.spacesTravelled >= enemy2TotalPossibleSpacesTravelled
+    );
+  }
+
   calculateNextMove() {
-    if (this.isGameOver || this.myPlayer.isStunned()) {
+    if (this.isGameOver || this.willWinGame() || this.myPlayer.isStunned()) {
       return null;
     }
 
@@ -833,21 +945,26 @@ class RollerSkateGameState extends GameState {
       const finalPosition = this.myPlayer.spacesTravelled + riskSpacesTravelled;
       const totalMoveCost = this.myPlayer.riskOrStunTimer + moveCost;
       if (totalMoveCost >= this.MAX_RISK_ALLOWED) {
-        moves[move] = STUNNED_WEIGHT;
+        moves[move] = this.STUN_TIMER;
       } else if (
         this.enemyPlayer1.isStunned() &&
         finalPosition % 10 === this.enemyPlayer1.spacesTravelled % 10
       ) {
-        moves[move] = STUNNED_WEIGHT;
+        moves[move] = this.STUN_TIMER;
       } else if (
         this.enemyPlayer2.isStunned() &&
         finalPosition % 10 === this.enemyPlayer2.spacesTravelled % 10
       ) {
-        moves[move] = STUNNED_WEIGHT;
+        moves[move] = this.STUN_TIMER;
       } else {
-        moves[move] = totalMoveCost - riskSpacesTravelled;
+        moves[move] = totalMoveCost - riskSpacesTravelled * 2;
       }
     }
+
+    console.error(`My position: ${this.myPlayer.spacesTravelled}`);
+    console.error(`My risk: ${this.myPlayer.riskOrStunTimer}`);
+    console.error(`Moves: ${JSON.stringify(moves)}`);
+
     return moves;
   }
 }
@@ -977,7 +1094,7 @@ class DivingGameState extends GameState {
       myForecastedScore >= enemyPlayer1ForecastedScore &&
       myForecastedScore >= enemyPlayer2ForecastedScore
     ) {
-      return -5;
+      return -7;
     } else if (
       myForecastedScore >= enemyPlayer1ForecastedScore ||
       myForecastedScore >= enemyPlayer2ForecastedScore
@@ -1100,9 +1217,10 @@ function decideMove(gameStates: GameState[] | null) {
 
   //  const priorityGames = allGames.filter((game) => !game.hasGoldMedal());
   // const priorityGames = allGames.filter(
-  //   (game) => game instanceof ArcheryGameState
+  //   (game) => game instanceof DivingGameState
   // );
-  const games = allGames; //priorityGames.length > 0 ? priorityGames : allGames;
+  // const games = priorityGames.length > 0 ? priorityGames : allGames;
+  const games = allGames;
 
   const movesToDecideFrom: {
     readonly LEFT: number;
