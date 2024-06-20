@@ -338,7 +338,7 @@ class HurdleGameState extends GameState {
   }
 
   get turnsLeftInGame(): number {
-    return this.MAP_LENGTH - this.myPlayer.position;
+    return this.calculateMovesLeft();
   }
 
   get currentlyStunned(): boolean {
@@ -434,6 +434,10 @@ class HurdleGameState extends GameState {
         tempMap = tempMap.slice(2);
       } else if (currentChunk === ".#.") {
         tempMap = tempMap.slice(2);
+      } else if (currentChunk === "..#") {
+        tempMap = tempMap.slice(1);
+      } else {
+        console.error(`Unknown chunk: ${currentChunk}`);
       }
       movesLeft++;
     }
@@ -442,25 +446,101 @@ class HurdleGameState extends GameState {
   }
 
   getStunnedWeight() {
-    return Weight.getStunnedWeight(
-      this.STUN_TIMER,
-      this.MAX_DISTANCE_PER_TURN,
-      this.myCurrentPlacement
+    return (
+      Weight.getStunnedWeight(
+        this.STUN_TIMER,
+        this.MAX_DISTANCE_PER_TURN,
+        this.myCurrentPlacement
+      ) * -1
     );
   }
 
-  calculateCorrectMove() {}
+  getMyCurrentDistanceFromFirst() {
+    const leader = Math.max(
+      this.myPlayer.position,
+      this.enemyPlayer1.position,
+      this.enemyPlayer2.position
+    );
+
+    return leader - this.myPlayer.position;
+  }
+
+  getMyCurrentDistanceFromSecond() {
+    const second = Math.max(
+      Math.min(this.myPlayer.position, this.enemyPlayer1.position),
+      Math.min(this.myPlayer.position, this.enemyPlayer2.position),
+      Math.min(this.enemyPlayer1.position, this.enemyPlayer2.position)
+    );
+
+    return second - this.myPlayer.position;
+  }
+
+  getForecastedPosition({
+    correctNumSpaces,
+    chosenNumSpaces,
+  }: {
+    correctNumSpaces: number;
+    chosenNumSpaces: number;
+  }) {
+    const myProjectedPosition = this.myPlayer.position + chosenNumSpaces;
+    const enemy1ProjectedPosition =
+      this.enemyPlayer1.position + correctNumSpaces;
+    const enemy2ProjectedPosition =
+      this.enemyPlayer2.position + correctNumSpaces;
+
+    const leader = Math.max(
+      myProjectedPosition,
+      enemy1ProjectedPosition,
+      enemy2ProjectedPosition
+    );
+
+    const second = Math.max(
+      Math.min(myProjectedPosition, enemy1ProjectedPosition),
+      Math.min(myProjectedPosition, enemy2ProjectedPosition),
+      Math.min(enemy1ProjectedPosition, enemy2ProjectedPosition)
+    );
+
+    const myCurrentDistanceFromFirst = this.getMyCurrentDistanceFromFirst();
+    const myCurrentDistanceFromSecond = this.getMyCurrentDistanceFromSecond();
+    const myProjectedDistanceFromFirst = leader - myProjectedPosition;
+    const myProjectedDistanceFromSecond = second - myProjectedPosition;
+
+    if (myProjectedDistanceFromFirst <= myCurrentDistanceFromFirst) {
+      return Weight.BEST;
+    } else if (myProjectedDistanceFromSecond <= myCurrentDistanceFromSecond) {
+      return Weight.GOOD;
+    } else {
+      return Weight.WORST;
+    }
+  }
 
   calculateNextMove() {
-    if (this.isGameOver) {
+    if (this.isGameOver || this.currentlyStunned) {
       return null;
     }
+
+    const movesLeft = this.calculateMovesLeft();
+    console.error(`Moves left: ${movesLeft}`);
+    console.error(`Map: ${this.map}`);
     if (!this.map.includes("#")) {
+      const correctNumSpaces = 3;
       return {
-        [MOVES.RIGHT]: Weight.BEST,
-        [MOVES.LEFT]: Weight.BAD,
-        [MOVES.UP]: Weight.GOOD,
-        [MOVES.DOWN]: Weight.GOOD,
+        [MOVES.RIGHT]: this.getForecastedPosition({
+          correctNumSpaces,
+          chosenNumSpaces: 3,
+        }),
+        [MOVES.LEFT]: this.getForecastedPosition({
+          correctNumSpaces,
+          chosenNumSpaces: 1,
+        }),
+        [MOVES.UP]: this.getForecastedPosition({
+          correctNumSpaces,
+          chosenNumSpaces: 2,
+        }),
+        [MOVES.DOWN]: this.getForecastedPosition({
+          correctNumSpaces,
+          chosenNumSpaces: 2,
+        }),
       };
     }
     const splitMap = chunkString(this.map, 3);
@@ -473,25 +553,84 @@ class HurdleGameState extends GameState {
       const nextChunk = isLastChunk ? null : splitMap[chunk + 1];
 
       if (currentChunk === "..." && nextChunk?.charAt(0) !== "#") {
+        const correctNumSpaces = 3;
         return {
-          [MOVES.RIGHT]: Weight.BEST,
-          [MOVES.LEFT]: Weight.BAD,
-          [MOVES.UP]: Weight.GOOD,
-          [MOVES.DOWN]: Weight.GOOD,
+          [MOVES.RIGHT]: this.getForecastedPosition({
+            correctNumSpaces,
+            chosenNumSpaces: 3,
+          }),
+          [MOVES.LEFT]: this.getForecastedPosition({
+            correctNumSpaces,
+            chosenNumSpaces: 1,
+          }),
+          [MOVES.UP]: this.getForecastedPosition({
+            correctNumSpaces,
+            chosenNumSpaces: 2,
+          }),
+          [MOVES.DOWN]: this.getForecastedPosition({
+            correctNumSpaces,
+            chosenNumSpaces: 2,
+          }),
         };
       } else if (currentChunk === "..." && nextChunk?.charAt(0) === "#") {
+        const correctNumSpaces = 2;
         return {
-          [MOVES.RIGHT]: this.getStunnedWeight(),
-          [MOVES.LEFT]: Weight.WORST,
-          [MOVES.UP]: Weight.BEST,
-          [MOVES.DOWN]: Weight.BEST,
+          [MOVES.RIGHT]: this.getForecastedPosition({
+            correctNumSpaces,
+            chosenNumSpaces: -3,
+          }),
+          [MOVES.LEFT]: this.getForecastedPosition({
+            correctNumSpaces,
+            chosenNumSpaces: 1,
+          }),
+          [MOVES.UP]: this.getForecastedPosition({
+            correctNumSpaces,
+            chosenNumSpaces: 2,
+          }),
+          [MOVES.DOWN]: this.getForecastedPosition({
+            correctNumSpaces,
+            chosenNumSpaces: 2,
+          }),
         };
       } else if (currentChunk === ".#.") {
+        const correctNumSpaces = 2;
         return {
-          [MOVES.RIGHT]: this.getStunnedWeight(),
-          [MOVES.LEFT]: this.getStunnedWeight(),
-          [MOVES.UP]: Weight.BEST,
-          [MOVES.DOWN]: this.getStunnedWeight(),
+          [MOVES.RIGHT]: this.getForecastedPosition({
+            correctNumSpaces,
+            chosenNumSpaces: this.getStunnedWeight(),
+          }),
+          [MOVES.LEFT]: this.getForecastedPosition({
+            correctNumSpaces,
+            chosenNumSpaces: this.getStunnedWeight(),
+          }),
+          [MOVES.UP]: this.getForecastedPosition({
+            correctNumSpaces,
+            chosenNumSpaces: 2,
+          }),
+          [MOVES.DOWN]: this.getForecastedPosition({
+            correctNumSpaces,
+            chosenNumSpaces: this.getStunnedWeight(),
+          }),
+        };
+      } else if (currentChunk === "..#") {
+        const correctNumSpaces = 1;
+        return {
+          [MOVES.RIGHT]: this.getForecastedPosition({
+            correctNumSpaces,
+            chosenNumSpaces: this.getStunnedWeight(),
+          }),
+          [MOVES.LEFT]: this.getForecastedPosition({
+            correctNumSpaces,
+            chosenNumSpaces: 1,
+          }),
+          [MOVES.UP]: this.getForecastedPosition({
+            correctNumSpaces,
+            chosenNumSpaces: this.getStunnedWeight(),
+          }),
+          [MOVES.DOWN]: this.getForecastedPosition({
+            correctNumSpaces,
+            chosenNumSpaces: this.getStunnedWeight(),
+          }),
         };
       }
     }
@@ -1216,11 +1355,11 @@ function decideMove(gameStates: GameState[] | null) {
   }
 
   //  const priorityGames = allGames.filter((game) => !game.hasGoldMedal());
-  // const priorityGames = allGames.filter(
-  //   (game) => game instanceof DivingGameState
-  // );
-  // const games = priorityGames.length > 0 ? priorityGames : allGames;
-  const games = allGames;
+  const priorityGames = allGames.filter(
+    (game) => game instanceof HurdleGameState
+  );
+  const games = priorityGames.length > 0 ? priorityGames : allGames;
+  // const games = allGames;
 
   const movesToDecideFrom: {
     readonly LEFT: number;
